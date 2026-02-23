@@ -65,7 +65,6 @@ INSTALLED_APPS = (
     "compressor",
     "hc.api",
     "hc.front",
-    "hc.logs",
     "hc.payments",
 )
 
@@ -123,7 +122,7 @@ LOGGING = {
     "handlers": {
         "db": {
             "level": "DEBUG",
-            "class": "hc.logs.Handler",
+            "class": "logging.StreamHandler",
         },
     },
     "loggers": {
