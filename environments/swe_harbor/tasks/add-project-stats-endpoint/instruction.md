@@ -1,111 +1,67 @@
-# Task: Add Project Stats API Endpoint and `archive_stale` Management Command
+# Task: Project Stats Endpoint + Stale Check Archiver Command
 
-## Background
+You are working on the Healthchecks codebase at `/app`.
 
-You are working on the [Healthchecks](https://github.com/healthchecks/healthchecks) codebase (v3.6),
-an open-source cron job monitoring service. The codebase is at `/app/`.
+## Part A: New endpoint
 
-The key models are:
-- `hc.api.models.Check` — a monitored job; has `status`, `project`, `name`, `last_ping`, `n_pings`, `tags`
-- `hc.accounts.models.Project` — a group of checks owned by a user; has `api_key`, `api_key_readonly`
+Add:
 
-Key files you'll need to work with:
-- `hc/api/views.py` — API views
-- `hc/api/urls.py` — URL routing
-- `hc/api/management/commands/` — existing management commands (for reference)
-- `hc/api/models.py` — models
+`GET /api/v3/projects/<uuid>/stats/`
 
-## What to Implement
+### Requirements
 
-This task has **two parts** that depend on each other:
+- File changes:
+  - `hc/api/views.py`
+  - `hc/api/urls.py`
+- Authentication: API key header (`X-Api-Key`), read-only keys should also work.
+- The project in URL must match the authenticated project, otherwise return `404`.
 
----
-
-### Part A: `GET /api/v3/projects/<project_uuid>/stats/`
-
-Create a new API endpoint that returns aggregate statistics about all checks in a project.
-
-**URL:** `/api/v3/projects/<project_uuid>/stats/`
-
-**Auth:** `X-Api-Key` header. The project UUID in the URL must match the project the key belongs to.
-If the UUID matches a different project, return 404.
-
-**Response (HTTP 200):**
+### Response (`200`)
 ```json
 {
-  "project_uuid": "abc-123-...",
+  "project_uuid": "<uuid>",
   "total": 42,
   "by_status": {
     "up": 30,
     "down": 5,
     "grace": 3,
     "paused": 2,
-    "new": 2,
-    "started": 0
+    "new": 1,
+    "started": 1
   },
   "total_pings": 18540,
   "stale_checks": 3
 }
 ```
 
-Fields:
-- `project_uuid`: the project's UUID as a string
-- `total`: total number of checks in the project
-- `by_status`: breakdown of checks by status (always include all 6 statuses, even if 0)
-- `total_pings`: sum of `n_pings` across all checks in the project
-- `stale_checks`: number of checks that have **never been pinged** (`n_pings == 0`) and were
-  created more than 7 days ago. A check is identified as stale if `n_pings == 0`
-  and `created` is more than 7 days before now.
-  (The `Check` model has a `created` field — check `hc/api/models.py` to confirm.)
+Where:
+- `total`: number of checks in project.
+- `by_status`: always include all 6 keys (`up`, `down`, `grace`, `paused`, `new`, `started`) even if zero.
+- `total_pings`: sum of `Check.n_pings` across all project checks (`0` when empty).
+- `stale_checks`: checks with `n_pings == 0` and `created` older than 7 days.
 
-**Error cases:**
-- `401` if the API key is missing or invalid
-- `404` if the project UUID doesn't match the authenticated project
+### Error cases
+- Missing/wrong key -> `401`
+- Wrong project UUID -> `404`
 
-**Note:** Read-only API keys should also be able to call this endpoint.
+## Part B: Management command
 
----
+Create:
 
-### Part B: `manage.py archive_stale_checks` Management Command
+`hc/api/management/commands/archive_stale_checks.py`
 
-Create a Django management command that finds and archives stale checks across **all** projects.
+### Behavior
+- Archive stale checks by setting status to `"paused"`.
+- “Stale” means:
+  - `n_pings == 0`
+  - `created` older than threshold (`--days`, default `30`)
+  - not already paused
+- Flags:
+  - `--dry-run` -> report only, no updates
+  - `--days N` -> custom threshold, `N` must be >= 1
 
-**File to create:** `hc/api/management/commands/archive_stale_checks.py`
+### Output
+- Normal: `Archived N stale checks.`
+- Dry run: `[DRY RUN] Would archive N stale checks.`
 
-**Behavior:**
-- Find all checks where `n_pings == 0` AND `created` is more than 30 days ago
-- Set their `status` to `"paused"` (this is the "archived" state)
-- Print a summary: `Archived N stale checks.`
-- Support a `--dry-run` flag: when passed, print what would be archived but don't
-  actually modify any checks. Output for dry run: `[DRY RUN] Would archive N stale checks.`
-- Support a `--days <N>` flag (default: 30) to customize the staleness threshold
-
-**Usage:**
-```bash
-python manage.py archive_stale_checks              # archive checks not pinged in 30+ days
-python manage.py archive_stale_checks --days 60    # use 60-day threshold
-python manage.py archive_stale_checks --dry-run    # preview only
-```
-
----
-
-### Files to Create/Modify
-
-| File | Action |
-|------|--------|
-| `hc/api/views.py` | Add `project_stats` view function |
-| `hc/api/urls.py` | Add URL route for `v3/projects/<uuid:code>/stats/` |
-| `hc/api/management/commands/archive_stale_checks.py` | **Create** this new file |
-
-Do NOT modify test files or any existing management commands.
-
----
-
-## Implementation Notes
-
-- Look at existing management commands in `hc/api/management/commands/` for the pattern to follow
-- The `BaseCommand` class is in `django.core.management.base`
-- Use `from django.utils import timezone; now = timezone.now()` for the current time
-- For the view, look at how other views use `@authorize` or `@authorize_read` decorators
-- The `Check` model's `created` field is a `DateTimeField` with `auto_now_add=True`
-- Use Django ORM aggregation: `from django.db.models import Sum; qs.aggregate(Sum('n_pings'))`
+Do not modify tests.
